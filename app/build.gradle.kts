@@ -6,21 +6,31 @@ plugins {
 
 android {
     namespace = "com.example.scrollorstudy"
-    compileSdk = 36 // Must be 36 for latest compose library links
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.example.scrollorstudy"
         minSdk = 24
-        targetSdk = 34 
+        targetSdk = 36
         versionCode = 1
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        create("release") {
+            storeFile = file(System.getProperty("user.home") + "/.android/debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     buildTypes {
         release {
-            isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("release")
+            isMinifyEnabled = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -33,6 +43,13 @@ android {
     }
     buildFeatures {
         compose = true
+    }
+    packaging {
+        resources {
+            excludes += "/META-INF/{AL2.0,LGPL2.1}"
+            excludes += "META-INF/NOTICE.md"
+            excludes += "META-INF/LICENSE.md"
+        }
     }
 }
 
@@ -64,6 +81,13 @@ dependencies {
     
     // Coil (Image Loading for URL Charts)
     implementation("io.coil-kt:coil-compose:2.6.0")
+    
+    // JavaMail API for SMTP (App Passwords)
+    implementation("com.sun.mail:android-mail:1.6.7")
+    implementation("com.sun.mail:android-activation:1.6.7")
+
+    // Biometric
+    implementation(libs.androidx.biometric)
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)

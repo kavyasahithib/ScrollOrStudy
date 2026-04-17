@@ -12,12 +12,17 @@ import android.widget.Toast
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AppCompatActivity
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.lifecycle.lifecycleScope
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
@@ -27,8 +32,7 @@ import com.example.scrollorstudy.ui.screens.parent.ParentDashboardScreen
 import com.example.scrollorstudy.ui.screens.profile.ProfileScreen
 import com.example.scrollorstudy.ui.theme.ScrollOrStudyTheme
 import com.google.firebase.auth.FirebaseAuth
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.launch
 
 class MainActivity : AppCompatActivity() {
 
@@ -38,44 +42,50 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-                requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1001)
-            }
-        }
-        
+        requestNotificationPermission()
         checkPermissions()
         
-        val initialRole = runBlocking { preferencesManager.userRole.first() }
-
         setContent {
             val isDarkMode by preferencesManager.isDarkMode.collectAsState(initial = false)
-            val currentUserRole by preferencesManager.userRole.collectAsState(initial = initialRole)
+            val currentUserRole by preferencesManager.userRole.collectAsState(initial = null)
+            val firebaseUser = FirebaseAuth.getInstance().currentUser
             
+            LaunchedEffect(firebaseUser, currentUserRole) {
+                if (currentUserRole != null && firebaseUser == null && currentUserRole != "parent") {
+                    navigateToLogin()
+                }
+            }
+
             ScrollOrStudyTheme(darkTheme = isDarkMode) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    val navController = rememberNavController()
-                    NavHost(navController = navController, startDestination = "dashboard") {
-                        composable("dashboard") {
-                            if (currentUserRole == "parent") {
-                                ParentDashboardScreen(
-                                    onProfileClick = { navController.navigate("profile") }
-                                )
-                            } else {
-                                DashboardScreen(
-                                    onProfileClick = { navController.navigate("profile") }
+                    if (currentUserRole == null) {
+                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                        }
+                    } else {
+                        val navController = rememberNavController()
+                        NavHost(navController = navController, startDestination = "dashboard") {
+                            composable("dashboard") {
+                                if (currentUserRole == "parent") {
+                                    ParentDashboardScreen(
+                                        onProfileClick = { navController.navigate("profile") }
+                                    )
+                                } else {
+                                    DashboardScreen(
+                                        onProfileClick = { navController.navigate("profile") }
+                                    )
+                                }
+                            }
+                            composable("profile") {
+                                ProfileScreen(
+                                    onBack = { navController.popBackStack() },
+                                    onLogout = { logout() },
+                                    onDeleteAccount = { deleteAccount() }
                                 )
                             }
-                        }
-                        composable("profile") {
-                            ProfileScreen(
-                                onBack = { navController.popBackStack() },
-                                onLogout = { logout() },
-                                onDeleteAccount = { deleteAccount() }
-                            )
                         }
                     }
                 }
@@ -83,9 +93,27 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun requestNotificationPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1001)
+            }
+        }
+    }
+
     private fun logout() {
-        FirebaseAuth.getInstance().signOut()
-        startActivity(Intent(this, LoginActivity::class.java))
+        lifecycleScope.launch {
+            preferencesManager.setUserRole("student")
+            preferencesManager.setStudentUidForParent("")
+            FirebaseAuth.getInstance().signOut()
+            navigateToLogin()
+        }
+    }
+
+    private fun navigateToLogin() {
+        val intent = Intent(this, LoginActivity::class.java)
+        intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+        startActivity(intent)
         finish()
     }
 
@@ -94,8 +122,7 @@ class MainActivity : AppCompatActivity() {
         user?.delete()?.addOnCompleteListener { task ->
             if (task.isSuccessful) {
                 Toast.makeText(this, "Account deleted successfully", Toast.LENGTH_SHORT).show()
-                startActivity(Intent(this, LoginActivity::class.java))
-                finish()
+                logout()
             } else {
                 Toast.makeText(this, "Failed: ${task.exception?.message}", Toast.LENGTH_LONG).show()
             }

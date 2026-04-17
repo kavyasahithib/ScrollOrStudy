@@ -24,7 +24,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
-import coil.compose.AsyncImage
+import com.example.scrollorstudy.ui.components.RadarChart
+import com.example.scrollorstudy.ui.components.RadarData
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -36,7 +37,7 @@ fun ParentDashboardScreen(
     val context = LocalContext.current
 
     Box(modifier = Modifier.fillMaxSize()) {
-        com.example.scrollorstudy.ui.components.AnimatedMeshBackground()
+        com.example.scrollorstudy.ui.components.LegendaryParentBackground()
         Scaffold(
             containerColor = Color.Transparent,
             topBar = {
@@ -71,39 +72,39 @@ fun ParentDashboardScreen(
                 }
             }
             
-            if (uiState.weeklyChartUrl != null) {
-                Spacer(modifier = Modifier.height(20.dp))
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(28.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f))
-                ) {
-                    Column(modifier = Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(text = "📊 Weekly Performance", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = MaterialTheme.colorScheme.primary)
-                        Spacer(modifier = Modifier.height(16.dp))
-                        AsyncImage(
-                            model = uiState.weeklyChartUrl,
-                            contentDescription = "Weekly Study vs. Scroll Chart",
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(220.dp)
-                                .clip(RoundedCornerShape(16.dp)),
-                            contentScale = ContentScale.Fit
-                        )
-                        Spacer(modifier = Modifier.height(12.dp))
-                        TextButton(
-                            onClick = { 
-                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(uiState.weeklyChartUrl))
-                                context.startActivity(intent)
-                            }
-                        ) {
-                            Text("Open Full Size", fontSize = 14.sp)
-                        }
-                    }
+            Spacer(modifier = Modifier.height(20.dp))
+            Card(
+                modifier = Modifier.fillMaxWidth().weight(1f),
+                shape = RoundedCornerShape(28.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f))
+            ) {
+                Column(modifier = Modifier.padding(24.dp).fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(text = "🔥 Holistic Analytics Web", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = MaterialTheme.colorScheme.primary)
+                    Spacer(modifier = Modifier.height(16.dp))
+                    
+                    val studyMax = 7200f // Dynamically scaled to 2 hours for massive visible spikes!
+                    val scrollPenaltyThreshold = 10800f // 3 hours curve to allow wider range of visual change 
+                    val efficiency = if (uiState.studentStudyTime + uiState.studentScrollTime > 0) {
+                        (uiState.studentStudyTime.toFloat() / (uiState.studentStudyTime + uiState.studentScrollTime)) * 100f
+                    } else 0f
+                    
+                    val radarData = listOf(
+                        RadarData("Study Volume", uiState.studentStudyTime.toFloat(), studyMax),
+                        RadarData("Consistency", uiState.studentStreak.toFloat(), 30f),
+                        RadarData("Constraint Bias", maxOf(0f, scrollPenaltyThreshold - uiState.studentScrollTime), scrollPenaltyThreshold),
+                        RadarData("Focus Yield", efficiency, 100f)
+                    )
+                    
+                    RadarChart(
+                        data = radarData,
+                        modifier = Modifier.fillMaxSize().padding(top = 16.dp, bottom = 8.dp),
+                        polyColor = Color(0xFF00C853),
+                        textColor = MaterialTheme.colorScheme.onSurface
+                    )
                 }
             }
             
-            Spacer(modifier = Modifier.weight(1f))
+            Spacer(modifier = Modifier.height(16.dp))
             Text(text = "Live monitoring active. Data updates in real-time.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha=0.8f), modifier = Modifier.fillMaxWidth().padding(bottom = 24.dp), textAlign = TextAlign.Center)
         }
     }

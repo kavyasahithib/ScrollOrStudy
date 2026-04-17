@@ -15,6 +15,10 @@ import android.widget.TextView
 import com.example.scrollorstudy.data.local.PreferencesManager
 import com.example.scrollorstudy.data.repository.UserRepository
 import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 
 class AppAccessibilityService : AccessibilityService() {
@@ -22,15 +26,14 @@ class AppAccessibilityService : AccessibilityService() {
     private val preferencesManager: PreferencesManager by lazy { (application as ScrollOrStudyApplication).container.preferencesManager }
     private val userRepository: UserRepository by lazy { (application as ScrollOrStudyApplication).container.userRepository }
 
-    private var currentApp: String? = null
+    private val currentApp = MutableStateFlow<String?>(null)
     private var distractionSeconds = 0
     private var overlayView: View? = null
     private var windowManager: WindowManager? = null
     
     private val serviceScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
-    private var trackingJob: Job? = null
 
-    private val distractingApps = listOf(
+    private val distractingApps = setOf(
         "com.google.android.youtube",
         "com.instagram.android",
         "com.facebook.katana",
@@ -39,7 +42,7 @@ class AppAccessibilityService : AccessibilityService() {
         "com.snapchat.android"
     )
 
-    private val usefulApps = listOf(
+    private val usefulApps = setOf(
         "com.google.android.apps.classroom",
         "com.github.android",
         "com.microsoft.office.word",
@@ -47,74 +50,80 @@ class AppAccessibilityService : AccessibilityService() {
         "com.google.android.apps.docs.editors.sheets"
     )
 
-    private val systemPackages = listOf(
-        "android",
-        "com.android.systemui",
-        "com.sec.android.app.launcher",
-        "com.google.android.apps.nexuslauncher",
-        "com.miui.home"
-    )
-
     override fun onServiceConnected() {
         super.onServiceConnected()
         Log.d("TRACKING", "Accessibility Service Connected")
         windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
+        
+        startTracking()
+    }
+
+    private fun startTracking() {
+        serviceScope.launch {
+            combine(
+                currentApp,
+                preferencesManager.isStudyModeActive,
+                preferencesManager.isHardcoreModeActive
+            ) { app, studyMode, hardcore ->
+                Triple(app, studyMode, hardcore)
+            }.distinctUntilChanged()
+            .collectLatest { (app, isStudyMode, isHardcore) ->
+                if (app == null) return@collectLatest
+                
+                if (isStudyMode) {
+                    if (distractingApps.contains(app)) {
+                        trackDistraction(isHardcore)
+                    } else if (usefulApps.contains(app)) {
+                        trackStudy()
+                    } else {
+                        resetTracking()
+                    }
+                } else {
+                    resetTracking()
+                }
+            }
+        }
+    }
+
+    private suspend fun trackDistraction(isHardcore: Boolean) {
+        while (true) {
+            delay(1000)
+            preferencesManager.updateTime(studyDelta = 0, scrollDelta = 1)
+            distractionSeconds++
+            
+            Log.d("TRACKING", "Distracting App: $distractionSeconds sec")
+            
+            if (distractionSeconds >= 15 && overlayView == null) {
+                showOverlay(isHardcore)
+            }
+
+            if (System.currentTimeMillis() % 10000 < 1000) {
+                syncToFirebase()
+            }
+        }
+    }
+
+    private suspend fun trackStudy() {
+        resetTracking()
+        while (true) {
+            delay(1000)
+            preferencesManager.updateTime(studyDelta = 1, scrollDelta = 0)
+            if (System.currentTimeMillis() % 10000 < 1000) {
+                syncToFirebase()
+            }
+        }
+    }
+
+    private fun resetTracking() {
+        distractionSeconds = 0
+        removeOverlay()
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event?.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
             val packageName = event.packageName?.toString() ?: return
-
-            if (packageName == this.packageName || packageName == "com.android.systemui") {
-                return
-            }
-
-            if (packageName == currentApp) return
-            
-            Log.d("TRACKING", "App Changed: $currentApp -> $packageName")
-            currentApp = packageName
-            
-            manageTrackingCycle()
-        }
-    }
-
-    private fun manageTrackingCycle() {
-        trackingJob?.cancel()
-        
-        val activeApp = currentApp ?: return
-        
-        if (distractingApps.contains(activeApp) || usefulApps.contains(activeApp)) {
-            trackingJob = serviceScope.launch {
-                while (isActive) {
-                    delay(1000)
-                    val isStudyMode = preferencesManager.isStudyModeActive.first()
-                    
-                    if (distractingApps.contains(activeApp)) {
-                        if (overlayView == null && isStudyMode) {
-                            preferencesManager.updateTime(studyDelta = 0, scrollDelta = 1)
-                            distractionSeconds++
-                            
-                            Log.d("TRACKING", "App: $activeApp | Time: $distractionSeconds sec")
-                            
-                            if (distractionSeconds >= 15) {
-                                Log.d("ALERT", "User wasting time")
-                                showOverlay()
-                            }
-                        }
-                    } else if (usefulApps.contains(activeApp) && isStudyMode) {
-                        preferencesManager.updateTime(studyDelta = 1, scrollDelta = 0)
-                        distractionSeconds = 0
-                        removeOverlay()
-                    }
-                    
-                    if (System.currentTimeMillis() % 10000 < 1000 && isStudyMode) {
-                        syncToFirebase()
-                    }
-                }
-            }
-        } else {
-            distractionSeconds = 0
-            removeOverlay()
+            if (packageName == this.packageName || packageName == "com.android.systemui") return
+            currentApp.value = packageName
         }
     }
 
@@ -126,7 +135,7 @@ class AppAccessibilityService : AccessibilityService() {
         userRepository.syncDailyProgress(study, scroll, streak, name)
     }
 
-    private fun showOverlay() {
+    private fun showOverlay(isHardcore: Boolean) {
         if (overlayView != null) return
 
         try {
@@ -154,8 +163,7 @@ class AppAccessibilityService : AccessibilityService() {
             windowManager?.addView(overlayView, params)
             
             serviceScope.launch {
-                val hardcore = preferencesManager.isHardcoreModeActive.first()
-                if (hardcore) {
+                if (isHardcore) {
                     closeBtn?.visibility = View.GONE
                     for (i in 5 downTo 1) {
                         if (overlayView == null) break
@@ -165,8 +173,7 @@ class AppAccessibilityService : AccessibilityService() {
                     if (overlayView != null) {
                         syncToFirebase()
                         performGlobalAction(GLOBAL_ACTION_HOME)
-                        removeOverlay()
-                        distractionSeconds = 0
+                        resetTracking()
                     }
                 } else {
                     val motivation = userRepository.getAiMotivation().first()
@@ -174,8 +181,7 @@ class AppAccessibilityService : AccessibilityService() {
                     closeBtn?.visibility = View.VISIBLE
                     closeBtn?.setOnClickListener {
                         serviceScope.launch { syncToFirebase() }
-                        removeOverlay()
-                        distractionSeconds = 0
+                        resetTracking()
                     }
                 }
             }
@@ -185,17 +191,15 @@ class AppAccessibilityService : AccessibilityService() {
     }
 
     private fun removeOverlay() {
-        if (overlayView != null) {
+        overlayView?.let {
             try {
-                windowManager?.removeView(overlayView)
+                windowManager?.removeView(it)
             } catch (e: Exception) {}
             overlayView = null
         }
     }
 
-    override fun onInterrupt() {
-        trackingJob?.cancel()
-    }
+    override fun onInterrupt() {}
 
     override fun onDestroy() {
         super.onDestroy()

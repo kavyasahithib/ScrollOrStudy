@@ -18,7 +18,7 @@ class PreferencesManager(context: Context) {
     val studyTimeToday: Flow<Long> = dataStore.data.map { it[STUDY_TIME] ?: 0L }
     val scrollTimeToday: Flow<Long> = dataStore.data.map { it[SCROLL_TIME] ?: 0L }
     val currentStreak: Flow<Int> = dataStore.data.map { it[STREAK] ?: 0 }
-    val userRole: Flow<String> = dataStore.data.map { it[USER_ROLE] ?: "student" }
+    val userRole: Flow<String> = dataStore.data.map { it[USER_ROLE] ?: "" }
     val userName: Flow<String> = dataStore.data.map { it[USER_NAME] ?: "" }
     val studentUidForParent: Flow<String> = dataStore.data.map { it[STUDENT_UID] ?: "" }
     val lastSyncStatus: Flow<String> = dataStore.data.map { it[LAST_SYNC_STATUS] ?: "Ready" }
